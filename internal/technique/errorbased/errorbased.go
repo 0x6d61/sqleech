@@ -55,6 +55,10 @@ var (
 	// postgresqlCastPattern matches PostgreSQL CAST type error output:
 	// invalid input syntax for type integer: "<DATA>"
 	postgresqlCastPattern = regexp.MustCompile(`invalid input syntax for type integer: "([^"]+)"`)
+
+	// mssqlConvertPattern matches MSSQL CONVERT/CAST type conversion error output:
+	// Conversion failed when converting the varchar value '<DATA>' to data type int.
+	mssqlConvertPattern = regexp.MustCompile(`(?i)Conversion failed when converting the (?:n?varchar|nchar|char|ntext|text) value '([^']+)' to data type`)
 )
 
 // ErrorBased implements the error-based SQL injection technique.
@@ -261,6 +265,7 @@ func parseErrorResponse(body string, dbmsName string) string {
 
 	tryMySQL := dbmsName == "" || dbmsName == "MySQL" || dbmsName == "mysql"
 	tryPostgreSQL := dbmsName == "" || dbmsName == "PostgreSQL" || dbmsName == "postgresql" || dbmsName == "postgres"
+	tryMSSQL := dbmsName == "" || dbmsName == "MSSQL" || dbmsName == "mssql" || dbmsName == "sqlserver"
 
 	if tryMySQL {
 		if matches := mysqlTildePattern.FindStringSubmatch(body); len(matches) > 1 {
@@ -270,6 +275,12 @@ func parseErrorResponse(body string, dbmsName string) string {
 
 	if tryPostgreSQL {
 		if matches := postgresqlCastPattern.FindStringSubmatch(body); len(matches) > 1 {
+			return matches[1]
+		}
+	}
+
+	if tryMSSQL {
+		if matches := mssqlConvertPattern.FindStringSubmatch(body); len(matches) > 1 {
 			return matches[1]
 		}
 	}
@@ -290,7 +301,7 @@ func collectPayloadTemplates(dbmsName string) []dbms.PayloadTemplate {
 
 	// Unknown DBMS: collect from all supported databases.
 	var templates []dbms.PayloadTemplate
-	for _, name := range []string{"MySQL", "PostgreSQL"} {
+	for _, name := range []string{"MySQL", "PostgreSQL", "MSSQL"} {
 		d := dbms.Registry(name)
 		if d != nil {
 			templates = append(templates, d.ErrorPayloads()...)

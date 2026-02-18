@@ -22,6 +22,9 @@ const mockVersionMySQL = "8.0.32"
 // mockVersionPostgreSQL is the fake PostgreSQL version returned by the mock server.
 const mockVersionPostgreSQL = "PostgreSQL 15.3"
 
+// mockVersionMSSQL is the fake MSSQL version string returned by the mock server.
+const mockVersionMSSQL = "Microsoft SQL Server 2019 (RTM-CU18) - 15.0.4261.1"
+
 // timebasedSleepCap is the maximum simulated delay for time-based handlers.
 // Kept short (1s) to keep integration tests fast.
 const timebasedSleepCap = 1 * time.Second
@@ -50,6 +53,10 @@ var tmplMap = template.Must(template.New("").Parse(`
 {{define "post-error"}}<html><body><h1>Error</h1><p>You have an error in your SQL syntax</p></body></html>{{end}}
 {{define "safe"}}<html><body><h1>Product</h1><p>Product details for item 42</p></body></html>{{end}}
 {{define "timebased-normal"}}<html><body><h1>Results</h1><p>Record found.</p></body></html>{{end}}
+{{define "mssql-convert-error"}}<html><body><h1>Error</h1><p>Conversion failed when converting the nvarchar value '` + mockVersionMSSQL + `' to data type int.</p></body></html>{{end}}
+{{define "mssql-syntax-error"}}<html><body><h1>Error</h1><p>Unclosed quotation mark after the character string '{{.}}'.</p></body></html>{{end}}
+{{define "mssql-normal"}}<html><body><h1>Results</h1><p>Row: 1</p></body></html>{{end}}
+{{define "mssql-false"}}<html><body><h1>Results</h1><p>No rows found.</p></body></html>{{end}}
 `))
 
 // asciiSubstringPattern extracts position and comparison value from boolean
@@ -75,6 +82,7 @@ func NewVulnServer() *httptest.Server {
 	mux.HandleFunc("/vuln/post", handlePost)
 	mux.HandleFunc("/vuln/timebased-mysql", handleTimeBasedMySQL)
 	mux.HandleFunc("/vuln/timebased-postgres", handleTimeBasedPostgres)
+	mux.HandleFunc("/vuln/error-mssql", handleErrorMSSQL)
 
 	return httptest.NewServer(mux)
 }
@@ -368,4 +376,28 @@ func handleTimeBasedPostgres(w http.ResponseWriter, r *http.Request) {
 	}
 
 	execTemplate(w, "timebased-normal", nil)
+}
+
+// handleErrorMSSQL simulates an MSSQL error-based injectable endpoint.
+//
+// GET /vuln/error-mssql?id=X
+//   - If X contains CONVERT(INT,...) or CAST(... AS INT): returns MSSQL type-conversion error
+//   - If X contains "'": returns MSSQL unclosed quotation mark error
+//   - If X contains "AND 1=2": returns empty result
+//   - Otherwise: returns normal result
+func handleErrorMSSQL(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+
+	switch {
+	case containsCI(id, "CONVERT(INT") || (containsCI(id, "CAST(") && containsCI(id, "AS INT")):
+		execTemplate(w, "mssql-convert-error", nil)
+	case strings.Contains(id, "'"):
+		execTemplate(w, "mssql-syntax-error", id)
+	case containsCI(id, "AND 1=2") || containsFalseCondition(id):
+		execTemplate(w, "mssql-false", nil)
+	case containsCI(id, "AND 1=1") || containsTrueCondition(id):
+		execTemplate(w, "mssql-normal", nil)
+	default:
+		execTemplate(w, "mssql-normal", nil)
+	}
 }
