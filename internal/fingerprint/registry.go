@@ -14,6 +14,7 @@ func NewRegistry() *Registry {
 		fingerprinters: []Fingerprinter{
 			&MySQLFingerprinter{},
 			&PostgreSQLFingerprinter{},
+			&mssqlFingerprinter{},
 		},
 	}
 }
@@ -30,7 +31,7 @@ func (r *Registry) Identify(ctx context.Context, req *FingerprintRequest) (*DBMS
 			return nil, err
 		}
 
-		if !result.Identified {
+		if result == nil || !result.Identified {
 			continue
 		}
 
@@ -53,7 +54,7 @@ func (r *Registry) Identify(ctx context.Context, req *FingerprintRequest) (*DBMS
 
 // supportedDBMS lists DBMS names that can be identified via error signatures.
 // "Generic" is intentionally excluded as it does not identify a specific DBMS.
-var supportedDBMS = []string{"MySQL", "PostgreSQL"}
+var supportedDBMS = []string{"MySQL", "PostgreSQL", "MSSQL"}
 
 // IdentifyFromErrors uses error signatures from a heuristic scan to identify
 // the DBMS without sending additional requests. This is a fast path that

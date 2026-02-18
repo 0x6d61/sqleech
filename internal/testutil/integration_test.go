@@ -680,6 +680,57 @@ func TestIntegration_TimeBased_MySQL(t *testing.T) {
 	t.Logf("request count: %d", result.RequestCount)
 }
 
+func TestIntegration_ErrorBased_MSSQL(t *testing.T) {
+	srv := NewVulnServer()
+	defer srv.Close()
+
+	client := newTestClient()
+	cfg := engine.DefaultScanConfig()
+	scanner := newFullScanner(client, cfg)
+
+	target := &engine.ScanTarget{
+		URL:    srv.URL + "/vuln/error-mssql?id=1",
+		Method: "GET",
+	}
+
+	ctx := context.Background()
+	result, err := scanner.Scan(ctx, target)
+	if err != nil {
+		t.Fatalf("Scan returned error: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("Scan returned nil result")
+	}
+
+	// Assert: at least 1 injectable vulnerability found
+	var foundInjectable bool
+	var foundErrorBased bool
+	for _, vuln := range result.Vulnerabilities {
+		if vuln.Injectable {
+			foundInjectable = true
+			if vuln.Technique == "error-based" {
+				foundErrorBased = true
+			}
+		}
+	}
+
+	if !foundInjectable {
+		t.Error("expected at least 1 injectable vulnerability, found none")
+		for _, v := range result.Vulnerabilities {
+			t.Logf("  param=%s technique=%s injectable=%v", v.Parameter.Name, v.Technique, v.Injectable)
+		}
+	}
+	if !foundErrorBased {
+		t.Error("expected error-based technique to detect MSSQL vulnerability")
+	}
+
+	// Assert: DBMS contains "MSSQL"
+	if !strings.Contains(result.DBMS, "MSSQL") {
+		t.Errorf("DBMS = %q, want to contain 'MSSQL'", result.DBMS)
+	}
+}
+
 func TestIntegration_TimeBased_PostgreSQL(t *testing.T) {
 	srv := NewVulnServer()
 	defer srv.Close()

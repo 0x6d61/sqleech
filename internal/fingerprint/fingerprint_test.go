@@ -282,11 +282,11 @@ func TestRegistry_NewRegistry(t *testing.T) {
 	if reg == nil {
 		t.Fatal("expected non-nil registry")
 	}
-	if len(reg.fingerprinters) != 2 {
-		t.Errorf("expected 2 fingerprinters registered, got %d", len(reg.fingerprinters))
+	if len(reg.fingerprinters) != 3 {
+		t.Errorf("expected 3 fingerprinters registered, got %d", len(reg.fingerprinters))
 	}
 
-	// Verify both MySQL and PostgreSQL are registered
+	// Verify MySQL, PostgreSQL, and MSSQL are all registered
 	names := make(map[string]bool)
 	for _, fp := range reg.fingerprinters {
 		names[fp.DBMS()] = true
@@ -296,6 +296,9 @@ func TestRegistry_NewRegistry(t *testing.T) {
 	}
 	if !names["PostgreSQL"] {
 		t.Error("expected PostgreSQL fingerprinter to be registered")
+	}
+	if !names["MSSQL"] {
+		t.Error("expected MSSQL fingerprinter to be registered")
 	}
 }
 

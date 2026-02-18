@@ -78,6 +78,8 @@ func Registry(name string) DBMS {
 		return &MySQL{}
 	case "PostgreSQL", "postgres", "postgresql":
 		return &PostgreSQL{}
+	case "MSSQL", "mssql", "sqlserver", "MSSQLServer":
+		return &MSSQL{}
 	default:
 		return nil
 	}
