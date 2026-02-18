@@ -44,3 +44,22 @@ jobs:
 
       - name: Run staticcheck
         run: staticcheck ./...
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Start Docker test environment
+        run: docker compose -f testenv/docker-compose.yml up -d --build --wait
+
+      - name: Run E2E tests
+        run: go test -v -tags e2e -count=1 -timeout 120s ./e2e/...
+
+      - name: Teardown Docker environment
+        if: always()
+        run: docker compose -f testenv/docker-compose.yml down

@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // mockVersionMySQL is the fake MySQL version returned by the mock server.
@@ -20,6 +21,13 @@ const mockVersionMySQL = "8.0.32"
 
 // mockVersionPostgreSQL is the fake PostgreSQL version returned by the mock server.
 const mockVersionPostgreSQL = "PostgreSQL 15.3"
+
+// timebasedSleepCap is the maximum simulated delay for time-based handlers.
+// Kept short (1s) to keep integration tests fast.
+const timebasedSleepCap = 1 * time.Second
+
+// sleepSecondsPattern extracts the seconds argument from SLEEP(n) or PG_SLEEP(n).
+var sleepSecondsPattern = regexp.MustCompile(`(?i)(?:PG_)?SLEEP\((\d+)\)`)
 
 // Response templates using html/template for safe HTML rendering.
 // Templates with {{.}} safely escape any dynamic data passed to them.
@@ -41,6 +49,7 @@ var tmplMap = template.Must(template.New("").Parse(`
 {{define "post-false"}}<html><body><h1>Login</h1><p>Login failed. Invalid credentials.</p></body></html>{{end}}
 {{define "post-error"}}<html><body><h1>Error</h1><p>You have an error in your SQL syntax</p></body></html>{{end}}
 {{define "safe"}}<html><body><h1>Product</h1><p>Product details for item 42</p></body></html>{{end}}
+{{define "timebased-normal"}}<html><body><h1>Results</h1><p>Record found.</p></body></html>{{end}}
 `))
 
 // asciiSubstringPattern extracts position and comparison value from boolean
@@ -64,6 +73,8 @@ func NewVulnServer() *httptest.Server {
 	mux.HandleFunc("/vuln/safe", handleSafe)
 	mux.HandleFunc("/vuln/multi", handleMulti)
 	mux.HandleFunc("/vuln/post", handlePost)
+	mux.HandleFunc("/vuln/timebased-mysql", handleTimeBasedMySQL)
+	mux.HandleFunc("/vuln/timebased-postgres", handleTimeBasedPostgres)
 
 	return httptest.NewServer(mux)
 }
@@ -289,4 +300,72 @@ func evaluateLength(input, mockData string) bool {
 	}
 
 	return len(mockData) > cmpVal
+}
+
+// shouldTimebasedSleep returns true when the payload should cause a DB sleep,
+// mirroring real DBMS behaviour:
+//   - IF(1=1,SLEEP(n),0)   → true condition  → sleep
+//   - IF(1=2,SLEEP(n),0)   → false condition → no sleep
+//   - CASE WHEN (1=1) THEN (SELECT 1 FROM PG_SLEEP(n)) ELSE 1 END → sleep
+//   - CASE WHEN (1=2) THEN (SELECT 1 FROM PG_SLEEP(n)) ELSE 1 END → no sleep
+func shouldTimebasedSleep(payload string) (seconds int, ok bool) {
+	matches := sleepSecondsPattern.FindStringSubmatch(payload)
+	if len(matches) < 2 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(matches[1])
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+
+	upper := strings.ToUpper(payload)
+	hasSleep := strings.Contains(upper, "SLEEP(")
+	isTrueCond := strings.Contains(upper, "1=1")
+	isFalseCond := strings.Contains(upper, "1=2")
+
+	// Sleep only when the condition is TRUE (contains 1=1, not only 1=2).
+	if hasSleep && isTrueCond && !isFalseCond {
+		return n, true
+	}
+	return 0, false
+}
+
+// handleTimeBasedMySQL simulates a MySQL time-based blind injectable endpoint.
+//
+// GET /vuln/timebased-mysql?id=X
+//   - TRUE condition (1=1 + SLEEP): sleeps min(n, cap) seconds
+//   - FALSE condition (1=2 + SLEEP): responds immediately (no sleep)
+//
+// This matches real MySQL IF(condition, SLEEP(n), 0) evaluation semantics.
+func handleTimeBasedMySQL(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+
+	if n, ok := shouldTimebasedSleep(id); ok {
+		d := time.Duration(n) * time.Second
+		if d > timebasedSleepCap {
+			d = timebasedSleepCap
+		}
+		time.Sleep(d)
+	}
+
+	execTemplate(w, "timebased-normal", nil)
+}
+
+// handleTimeBasedPostgres simulates a PostgreSQL time-based blind injectable endpoint.
+//
+// GET /vuln/timebased-postgres?id=X
+//   - TRUE condition: sleeps min(n, cap) seconds
+//   - FALSE condition: responds immediately
+func handleTimeBasedPostgres(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+
+	if n, ok := shouldTimebasedSleep(id); ok {
+		d := time.Duration(n) * time.Second
+		if d > timebasedSleepCap {
+			d = timebasedSleepCap
+		}
+		time.Sleep(d)
+	}
+
+	execTemplate(w, "timebased-normal", nil)
 }
