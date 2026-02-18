@@ -18,6 +18,7 @@ import (
 	"github.com/0x6d61/sqleech/internal/technique/boolean"
 	"github.com/0x6d61/sqleech/internal/technique/errorbased"
 	"github.com/0x6d61/sqleech/internal/technique/timebased"
+	"github.com/0x6d61/sqleech/internal/technique/union"
 	"github.com/0x6d61/sqleech/internal/transport"
 )
 
@@ -767,6 +768,98 @@ func TestIntegration_TimeBased_PostgreSQL(t *testing.T) {
 
 	if !foundTimeBased {
 		t.Error("expected time-based technique to detect vulnerability on /vuln/timebased-postgres")
+		for _, v := range result.Vulnerabilities {
+			t.Logf("  param=%s technique=%s injectable=%v", v.Parameter.Name, v.Technique, v.Injectable)
+		}
+	}
+	t.Logf("request count: %d", result.RequestCount)
+}
+
+func TestIntegration_UnionBased_MySQL(t *testing.T) {
+	srv := NewVulnServer()
+	defer srv.Close()
+
+	client := newTestClient()
+	cfg := engine.DefaultScanConfig()
+	// ForceTest=true bypasses heuristics: the UNION endpoint returns the same
+	// page for single-quote probes, so heuristics would skip it without this flag.
+	cfg.ForceTest = true
+	scanner := engine.NewScanner(client, cfg,
+		engine.WithTechniques(wrapTechniques(union.New())...),
+		engine.WithParameterParser(makeParamParser()),
+		engine.WithHeuristicDetector(makeHeuristicFunc(client)),
+		engine.WithDBMSIdentifier(makeDBMSIdentifier()),
+		engine.WithFingerprinter(makeFingerprinter()),
+	)
+
+	target := &engine.ScanTarget{
+		URL:    srv.URL + "/vuln/union-mysql?id=1",
+		Method: "GET",
+	}
+
+	ctx := context.Background()
+	result, err := scanner.Scan(ctx, target)
+	if err != nil {
+		t.Fatalf("Scan returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Scan returned nil result")
+	}
+
+	var foundUnion bool
+	for _, vuln := range result.Vulnerabilities {
+		if vuln.Injectable && vuln.Technique == "union-based" {
+			foundUnion = true
+		}
+	}
+
+	if !foundUnion {
+		t.Error("expected union-based technique to detect vulnerability on /vuln/union-mysql")
+		for _, v := range result.Vulnerabilities {
+			t.Logf("  param=%s technique=%s injectable=%v", v.Parameter.Name, v.Technique, v.Injectable)
+		}
+	}
+	t.Logf("request count: %d", result.RequestCount)
+}
+
+func TestIntegration_UnionBased_PostgreSQL(t *testing.T) {
+	srv := NewVulnServer()
+	defer srv.Close()
+
+	client := newTestClient()
+	cfg := engine.DefaultScanConfig()
+	cfg.ForceTest = true
+	scanner := engine.NewScanner(client, cfg,
+		engine.WithTechniques(wrapTechniques(union.New())...),
+		engine.WithParameterParser(makeParamParser()),
+		engine.WithHeuristicDetector(makeHeuristicFunc(client)),
+		engine.WithDBMSIdentifier(makeDBMSIdentifier()),
+		engine.WithFingerprinter(makeFingerprinter()),
+	)
+
+	target := &engine.ScanTarget{
+		URL:    srv.URL + "/vuln/union-postgres?id=1",
+		Method: "GET",
+	}
+
+	ctx := context.Background()
+	result, err := scanner.Scan(ctx, target)
+	if err != nil {
+		t.Fatalf("Scan returned error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Scan returned nil result")
+	}
+
+	var foundUnion bool
+	for _, vuln := range result.Vulnerabilities {
+		if vuln.Injectable && vuln.Technique == "union-based" {
+			foundUnion = true
+		}
+	}
+
+	if !foundUnion {
+		t.Error("expected union-based technique to detect vulnerability on /vuln/union-postgres")
 		for _, v := range result.Vulnerabilities {
 			t.Logf("  param=%s technique=%s injectable=%v", v.Parameter.Name, v.Technique, v.Injectable)
 		}

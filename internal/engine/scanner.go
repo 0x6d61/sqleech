@@ -149,6 +149,7 @@ var techniqueFilterMap = map[string]string{
 	"E": "error-based",
 	"B": "boolean-blind",
 	"T": "time-based",
+	"U": "union-based",
 }
 
 // NewScanner creates a scanner with all components wired up.

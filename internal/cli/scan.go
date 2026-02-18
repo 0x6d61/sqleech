@@ -19,6 +19,7 @@ import (
 	"github.com/0x6d61/sqleech/internal/technique/boolean"
 	"github.com/0x6d61/sqleech/internal/technique/errorbased"
 	"github.com/0x6d61/sqleech/internal/technique/timebased"
+	"github.com/0x6d61/sqleech/internal/technique/union"
 	"github.com/0x6d61/sqleech/internal/transport"
 )
 
@@ -105,7 +106,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	cfg.ForceTest = forceTest
 	if techniqueStr != "" {
 		// Split on comma, normalise to upper-case.
-		// Accepted codes: E (error-based), B (boolean-blind), T (time-based)
+		// Accepted codes: E (error-based), B (boolean-blind), T (time-based), U (union-based)
 		for _, code := range strings.Split(techniqueStr, ",") {
 			code = strings.TrimSpace(strings.ToUpper(code))
 			if code != "" {
@@ -223,14 +224,15 @@ func runScan(cmd *cobra.Command, args []string) error {
 // --------------------------------------------------------------------------
 
 // buildScanner creates an engine.Scanner wired with all real implementations:
-// error-based, boolean-blind, time-based techniques; the heuristic detector;
-// the DBMS fingerprinter; and the parameter parser.
+// error-based, boolean-blind, time-based, union-based techniques; the heuristic
+// detector; the DBMS fingerprinter; and the parameter parser.
 func buildScanner(client transport.Client, cfg *engine.ScanConfig) *engine.Scanner {
 	return engine.NewScanner(client, cfg,
 		engine.WithTechniques(
 			wrapTechnique(errorbased.New()),
 			wrapTechnique(boolean.New()),
 			wrapTechnique(timebased.New()),
+			wrapTechnique(union.New()),
 		),
 		engine.WithParameterParser(buildParamParser()),
 		engine.WithHeuristicDetector(buildHeuristicDetector(client)),

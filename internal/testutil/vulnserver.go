@@ -7,6 +7,7 @@
 package testutil
 
 import (
+	"fmt"
 	"html/template"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,13 @@ const mockVersionMSSQL = "Microsoft SQL Server 2019 (RTM-CU18) - 15.0.4261.1"
 // timebasedSleepCap is the maximum simulated delay for time-based handlers.
 // Kept short (1s) to keep integration tests fast.
 const timebasedSleepCap = 1 * time.Second
+
+// unionSentinel is the marker string used by the UNION technique to identify
+// string-accepting columns. Must match technique/union.sentinel.
+const unionSentinel = "sqleech3z9"
+
+// unionNumCols is the number of columns simulated by the UNION endpoints.
+const unionNumCols = 2
 
 // sleepSecondsPattern extracts the seconds argument from SLEEP(n) or PG_SLEEP(n).
 var sleepSecondsPattern = regexp.MustCompile(`(?i)(?:PG_)?SLEEP\((\d+)\)`)
@@ -57,6 +65,13 @@ var tmplMap = template.Must(template.New("").Parse(`
 {{define "mssql-syntax-error"}}<html><body><h1>Error</h1><p>Unclosed quotation mark after the character string '{{.}}'.</p></body></html>{{end}}
 {{define "mssql-normal"}}<html><body><h1>Results</h1><p>Row: 1</p></body></html>{{end}}
 {{define "mssql-false"}}<html><body><h1>Results</h1><p>No rows found.</p></body></html>{{end}}
+{{define "union-order-error"}}<html><body><h1>Error</h1><p>Unknown column '{{.}}' in 'order clause'</p></body></html>{{end}}
+{{define "union-mysql-normal"}}<html><body><h1>Products</h1><p>ID: 1 | Name: Widget</p></body></html>{{end}}
+{{define "union-mysql-sentinel"}}<html><body><h1>Products</h1><p>ID: 1 | Name: ` + unionSentinel + `</p></body></html>{{end}}
+{{define "union-mysql-injected"}}<html><body><h1>Products</h1><p>ID: 1 | Name: ~` + mockVersionMySQL + `~</p></body></html>{{end}}
+{{define "union-pg-normal"}}<html><body><h1>Users</h1><p>ID: 1 | Name: Admin</p></body></html>{{end}}
+{{define "union-pg-sentinel"}}<html><body><h1>Users</h1><p>ID: 1 | Name: ` + unionSentinel + `</p></body></html>{{end}}
+{{define "union-pg-injected"}}<html><body><h1>Users</h1><p>ID: 1 | Name: ~` + mockVersionPostgreSQL + `~</p></body></html>{{end}}
 `))
 
 // asciiSubstringPattern extracts position and comparison value from boolean
@@ -83,6 +98,8 @@ func NewVulnServer() *httptest.Server {
 	mux.HandleFunc("/vuln/timebased-mysql", handleTimeBasedMySQL)
 	mux.HandleFunc("/vuln/timebased-postgres", handleTimeBasedPostgres)
 	mux.HandleFunc("/vuln/error-mssql", handleErrorMSSQL)
+	mux.HandleFunc("/vuln/union-mysql", handleUnionMySQL)
+	mux.HandleFunc("/vuln/union-postgres", handleUnionPostgres)
 
 	return httptest.NewServer(mux)
 }
@@ -400,4 +417,86 @@ func handleErrorMSSQL(w http.ResponseWriter, r *http.Request) {
 	default:
 		execTemplate(w, "mssql-normal", nil)
 	}
+}
+
+// handleUnionMySQL simulates a MySQL UNION-based injectable endpoint.
+//
+// GET /vuln/union-mysql?id=X
+//   - ORDER BY N where N <= 2: normal response (2-column query)
+//   - ORDER BY N where N > 2: error response (column out of range)
+//   - UNION SELECT containing sentinel: response includes sentinel
+//   - UNION SELECT (other): response includes ~mockVersionMySQL~ markers
+//   - Otherwise: normal product listing
+func handleUnionMySQL(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	upper := strings.ToUpper(id)
+
+	if n, ok := parseVulnOrderByN(upper); ok {
+		if n > unionNumCols {
+			execTemplate(w, "union-order-error", n)
+			return
+		}
+		execTemplate(w, "union-mysql-normal", nil)
+		return
+	}
+
+	if containsCI(id, "UNION") && containsCI(id, "SELECT") {
+		if strings.Contains(id, unionSentinel) {
+			execTemplate(w, "union-mysql-sentinel", nil)
+			return
+		}
+		execTemplate(w, "union-mysql-injected", nil)
+		return
+	}
+
+	execTemplate(w, "union-mysql-normal", nil)
+}
+
+// handleUnionPostgres simulates a PostgreSQL UNION-based injectable endpoint.
+//
+// GET /vuln/union-postgres?id=X
+//   - ORDER BY N where N <= 2: normal response (2-column query)
+//   - ORDER BY N where N > 2: error response (column out of range)
+//   - UNION SELECT containing sentinel: response includes sentinel
+//   - UNION SELECT (other): response includes ~mockVersionPostgreSQL~ markers
+//   - Otherwise: normal user listing
+func handleUnionPostgres(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	upper := strings.ToUpper(id)
+
+	if n, ok := parseVulnOrderByN(upper); ok {
+		if n > unionNumCols {
+			execTemplate(w, "union-order-error", n)
+			return
+		}
+		execTemplate(w, "union-pg-normal", nil)
+		return
+	}
+
+	if containsCI(id, "UNION") && containsCI(id, "SELECT") {
+		if strings.Contains(id, unionSentinel) {
+			execTemplate(w, "union-pg-sentinel", nil)
+			return
+		}
+		execTemplate(w, "union-pg-injected", nil)
+		return
+	}
+
+	execTemplate(w, "union-pg-normal", nil)
+}
+
+// parseVulnOrderByN extracts N from "ORDER BY N" in an upper-case string.
+// Returns (0, false) if no ORDER BY clause is found or parsing fails.
+func parseVulnOrderByN(upper string) (int, bool) {
+	const token = "ORDER BY"
+	idx := strings.Index(upper, token)
+	if idx == -1 {
+		return 0, false
+	}
+	rest := strings.TrimSpace(upper[idx+len(token):])
+	var n int
+	if _, err := fmt.Sscan(rest, &n); err != nil {
+		return 0, false
+	}
+	return n, true
 }
