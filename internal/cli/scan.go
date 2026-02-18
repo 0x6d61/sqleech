@@ -16,6 +16,7 @@ import (
 	"github.com/0x6d61/sqleech/internal/report"
 	"github.com/0x6d61/sqleech/internal/session"
 	"github.com/0x6d61/sqleech/internal/technique"
+	"github.com/0x6d61/sqleech/internal/tamper"
 	"github.com/0x6d61/sqleech/internal/technique/boolean"
 	"github.com/0x6d61/sqleech/internal/technique/errorbased"
 	"github.com/0x6d61/sqleech/internal/technique/timebased"
@@ -35,6 +36,7 @@ func init() {
 	rootCmd.AddCommand(scanCmd)
 	// Session flag is scan-specific (not shared with other commands)
 	scanCmd.Flags().String("session", "", "Session file path for saving/resuming scans (SQLite)")
+	scanCmd.Flags().StringSlice("tamper", nil, "Comma-separated tamper scripts for WAF bypass (space2comment,uppercase,charencode,between)")
 }
 
 // runScan is the main scan command handler. It wires up the full scanner
@@ -66,6 +68,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	forceTest, _ := cmd.Flags().GetBool("force-test")
 	threads, _ := cmd.Flags().GetInt("threads")
 	sessionPath, _ := cmd.Flags().GetString("session")
+	tamperNames, _ := cmd.Flags().GetStringSlice("tamper")
 
 	// ------------------------------------------------------------------ //
 	// 2. Normalize URL and method
@@ -86,7 +89,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	// ------------------------------------------------------------------ //
 	// 3. Transport client
 	// ------------------------------------------------------------------ //
-	client, err := transport.NewClient(transport.ClientOptions{
+	baseClient, err := transport.NewClient(transport.ClientOptions{
 		Timeout:         timeout,
 		ProxyURL:        proxyURL,
 		FollowRedirects: true,
@@ -94,6 +97,22 @@ func runScan(cmd *cobra.Command, args []string) error {
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP client: %w", err)
+	}
+
+	// Apply tamper scripts if specified; WrapClient returns transport.Client.
+	var client transport.Client = baseClient
+	if len(tamperNames) > 0 {
+		chain := tamper.BuildChain(tamperNames...)
+		if len(chain) > 0 {
+			client = tamper.WrapClient(client, chain)
+			if verbose > 0 {
+				names := make([]string, len(chain))
+				for i, t := range chain {
+					names[i] = t.Name()
+				}
+				fmt.Printf("[*] Tamper scripts: %s\n", strings.Join(names, ", "))
+			}
+		}
 	}
 
 	// ------------------------------------------------------------------ //
