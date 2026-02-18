@@ -301,7 +301,7 @@ func collectPayloadTemplates(dbmsName string) []dbms.PayloadTemplate {
 
 	// Unknown DBMS: collect from all supported databases.
 	var templates []dbms.PayloadTemplate
-	for _, name := range []string{"MySQL", "PostgreSQL", "MSSQL"} {
+	for _, name := range []string{"MySQL", "PostgreSQL", "MSSQL", "Oracle", "SQLite"} {
 		d := dbms.Registry(name)
 		if d != nil {
 			templates = append(templates, d.ErrorPayloads()...)

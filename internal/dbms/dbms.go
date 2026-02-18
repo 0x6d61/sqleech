@@ -80,6 +80,10 @@ func Registry(name string) DBMS {
 		return &PostgreSQL{}
 	case "MSSQL", "mssql", "sqlserver", "MSSQLServer":
 		return &MSSQL{}
+	case "Oracle", "oracle":
+		return &Oracle{}
+	case "SQLite", "sqlite", "sqlite3":
+		return &SQLite{}
 	default:
 		return nil
 	}
