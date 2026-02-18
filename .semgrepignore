@@ -1,0 +1,3 @@
+# testenv/vulnapp is an intentionally vulnerable application used for testing sqleech.
+# All SQL injection and XSS findings here are by design.
+testenv/vulnapp/

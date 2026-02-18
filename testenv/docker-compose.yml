@@ -1,0 +1,45 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: sqleech_test
+      MYSQL_DATABASE: testdb
+    ports:
+      - "13306:3306"
+    volumes:
+      - ./initdb/mysql:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-psqleech_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: sqleech_test
+      POSTGRES_DB: testdb
+    ports:
+      - "15432:5432"
+    volumes:
+      - ./initdb/postgres:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  vulnapp:
+    build:
+      context: ./vulnapp
+      dockerfile: Dockerfile
+    ports:
+      - "18080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      MYSQL_DSN: "root:sqleech_test@tcp(mysql:3306)/testdb"
+      POSTGRES_DSN: "host=postgres port=5432 user=postgres password=sqleech_test dbname=testdb sslmode=disable"

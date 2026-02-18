@@ -17,6 +17,7 @@ import (
 	"github.com/0x6d61/sqleech/internal/technique"
 	"github.com/0x6d61/sqleech/internal/technique/boolean"
 	"github.com/0x6d61/sqleech/internal/technique/errorbased"
+	"github.com/0x6d61/sqleech/internal/technique/timebased"
 	"github.com/0x6d61/sqleech/internal/transport"
 )
 
@@ -143,7 +144,7 @@ func makeParamParser() engine.ParameterParser {
 // newFullScanner creates a Scanner wired with all real implementations.
 func newFullScanner(client transport.Client, config *engine.ScanConfig) *engine.Scanner {
 	return engine.NewScanner(client, config,
-		engine.WithTechniques(wrapTechniques(errorbased.New(), boolean.New())...),
+		engine.WithTechniques(wrapTechniques(errorbased.New(), boolean.New(), timebased.New())...),
 		engine.WithParameterParser(makeParamParser()),
 		engine.WithHeuristicDetector(makeHeuristicFunc(client)),
 		engine.WithDBMSIdentifier(makeDBMSIdentifier()),
@@ -194,7 +195,9 @@ func (c *testTransportClient) Do(ctx context.Context, req *transport.Request) (*
 		})
 	}
 
+	start := time.Now()
 	resp, err := http.DefaultClient.Do(httpReq)
+	duration := time.Since(start)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +214,7 @@ func (c *testTransportClient) Do(ctx context.Context, req *transport.Request) (*
 		StatusCode: resp.StatusCode,
 		Headers:    resp.Header,
 		Body:       body,
-		Duration:   time.Millisecond,
+		Duration:   duration,
 		URL:        resp.Request.URL.String(),
 		Protocol:   "HTTP/1.1",
 	}, nil
@@ -628,4 +631,94 @@ func TestIntegration_PostParameter(t *testing.T) {
 			t.Logf("  param=%s technique=%s injectable=%v", v.Parameter.Name, v.Technique, v.Injectable)
 		}
 	}
+}
+
+func TestIntegration_TimeBased_MySQL(t *testing.T) {
+	srv := NewVulnServer()
+	defer srv.Close()
+
+	client := newTestClient()
+
+	// Use short sleep (1s) with low tolerance so integration test stays fast.
+	// The VulnServer handler sleeps min(n, 1s), so threshold = 0 + 0.3*1s = 300ms.
+	// ForceTest=true bypasses heuristics: timebased endpoints show no content difference,
+	// so heuristics would mark them as non-injectable without this flag.
+	cfg := engine.DefaultScanConfig()
+	cfg.ForceTest = true
+	scanner := engine.NewScanner(client, cfg,
+		engine.WithTechniques(wrapTechniques(timebased.NewWithConfig(1, 0.3))...),
+		engine.WithParameterParser(makeParamParser()),
+		engine.WithHeuristicDetector(makeHeuristicFunc(client)),
+		engine.WithDBMSIdentifier(makeDBMSIdentifier()),
+		engine.WithFingerprinter(makeFingerprinter()),
+	)
+
+	target := &engine.ScanTarget{
+		URL:    srv.URL + "/vuln/timebased-mysql?id=1",
+		Method: "GET",
+	}
+
+	ctx := context.Background()
+	result, err := scanner.Scan(ctx, target)
+	if err != nil {
+		t.Fatalf("Scan returned error: %v", err)
+	}
+
+	var foundTimeBased bool
+	for _, vuln := range result.Vulnerabilities {
+		if vuln.Injectable && vuln.Technique == "time-based" {
+			foundTimeBased = true
+		}
+	}
+
+	if !foundTimeBased {
+		t.Error("expected time-based technique to detect vulnerability on /vuln/timebased-mysql")
+		for _, v := range result.Vulnerabilities {
+			t.Logf("  param=%s technique=%s injectable=%v", v.Parameter.Name, v.Technique, v.Injectable)
+		}
+	}
+	t.Logf("request count: %d", result.RequestCount)
+}
+
+func TestIntegration_TimeBased_PostgreSQL(t *testing.T) {
+	srv := NewVulnServer()
+	defer srv.Close()
+
+	client := newTestClient()
+
+	cfg := engine.DefaultScanConfig()
+	cfg.ForceTest = true
+	scanner := engine.NewScanner(client, cfg,
+		engine.WithTechniques(wrapTechniques(timebased.NewWithConfig(1, 0.3))...),
+		engine.WithParameterParser(makeParamParser()),
+		engine.WithHeuristicDetector(makeHeuristicFunc(client)),
+		engine.WithDBMSIdentifier(makeDBMSIdentifier()),
+		engine.WithFingerprinter(makeFingerprinter()),
+	)
+
+	target := &engine.ScanTarget{
+		URL:    srv.URL + "/vuln/timebased-postgres?id=1",
+		Method: "GET",
+	}
+
+	ctx := context.Background()
+	result, err := scanner.Scan(ctx, target)
+	if err != nil {
+		t.Fatalf("Scan returned error: %v", err)
+	}
+
+	var foundTimeBased bool
+	for _, vuln := range result.Vulnerabilities {
+		if vuln.Injectable && vuln.Technique == "time-based" {
+			foundTimeBased = true
+		}
+	}
+
+	if !foundTimeBased {
+		t.Error("expected time-based technique to detect vulnerability on /vuln/timebased-postgres")
+		for _, v := range result.Vulnerabilities {
+			t.Logf("  param=%s technique=%s injectable=%v", v.Parameter.Name, v.Technique, v.Injectable)
+		}
+	}
+	t.Logf("request count: %d", result.RequestCount)
 }

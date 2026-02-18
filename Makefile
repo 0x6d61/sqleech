@@ -4,7 +4,7 @@ COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS=-ldflags "-X github.com/0x6d61/sqleech/internal/cli.version=$(VERSION) -X github.com/0x6d61/sqleech/internal/cli.commit=$(COMMIT) -X github.com/0x6d61/sqleech/internal/cli.date=$(DATE)"
 
-.PHONY: build test lint clean run vet fmt
+.PHONY: build test lint clean run vet fmt e2e-up e2e-down e2e-test e2e
 
 build:
 	go build $(LDFLAGS) -o bin/$(BINARY_NAME) ./cmd/sqleech
@@ -39,3 +39,15 @@ clean:
 	rm -rf bin/ coverage.out coverage.html
 
 all: fmt vet lint test build
+
+# E2E test targets (requires Docker)
+e2e-up:
+	docker compose -f testenv/docker-compose.yml up -d --build --wait
+
+e2e-down:
+	docker compose -f testenv/docker-compose.yml down
+
+e2e-test:
+	go test -v -tags e2e -count=1 -timeout 120s ./e2e/...
+
+e2e: e2e-up e2e-test e2e-down
